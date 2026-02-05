@@ -5,3 +5,4 @@ images/
 .DS_Store
 web/__pycache__/
 cluster_labels.json
+web/nn_labels.json

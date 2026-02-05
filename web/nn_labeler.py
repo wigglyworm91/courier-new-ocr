@@ -190,6 +190,10 @@ def predict_all() -> None:
             pred_char = g_idx_to_char[pred_idx.item()]
             g_predictions[f.name] = (pred_char, confidence.item())
 
+            if i % 1000 == 0:
+                print(f"  Predicted {i} / {len(g_char_files)}...\r", end="")
+                sys.stdout.flush()
+
     print(f"Predicted {len(g_predictions)} unlabeled images.")
 
 
@@ -326,9 +330,9 @@ def main():
     load_images(char_dir)
     load_existing_labels()
 
-    if len(g_labels) >= 10:
-        print("Found existing labels, training model...")
-        train_model()
+    #if len(g_labels) >= 10:
+    #    print("Found existing labels, training model...")
+    #    train_model()
 
     print("\nStarting web server...")
     print("Open http://localhost:5000 in your browser")
