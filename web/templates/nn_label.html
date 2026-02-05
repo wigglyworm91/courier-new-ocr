@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NN Character Labeler</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        .container {
+            background: #16213e;
+            padding: 30px;
+            border-radius: 12px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #333;
+        }
+        h1 { margin: 0; font-size: 1.5em; }
+        .stats {
+            font-size: 0.9em;
+            color: #888;
+        }
+        .main-display {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+            background: #0f0f23;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .char-image {
+            image-rendering: pixelated;
+            width: 200px;
+            height: auto;
+            border: 2px solid #333;
+            background: #fff;
+            margin-bottom: 15px;
+        }
+        .filename {
+            font-family: monospace;
+            font-size: 0.85em;
+            color: #666;
+            margin-bottom: 15px;
+            word-break: break-all;
+        }
+        .prediction {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+        .prediction .char {
+            font-family: 'Courier New', monospace;
+            font-size: 1.5em;
+            background: #2d2d44;
+            padding: 4px 12px;
+            border-radius: 4px;
+            margin: 0 5px;
+        }
+        .confidence {
+            font-size: 0.9em;
+            color: #888;
+        }
+        .confidence.high { color: #4ade80; }
+        .confidence.medium { color: #fbbf24; }
+        .confidence.low { color: #f87171; }
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            width: 80px;
+            padding: 15px;
+            font-size: 32px;
+            text-align: center;
+            border: 2px solid #444;
+            border-radius: 8px;
+            background: #1a1a2e;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #6366f1;
+        }
+        button {
+            padding: 15px 25px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #6366f1;
+            color: white;
+        }
+        .btn-primary:hover { background: #4f46e5; }
+        .btn-secondary {
+            background: #374151;
+            color: white;
+        }
+        .btn-secondary:hover { background: #4b5563; }
+        .btn-success {
+            background: #059669;
+            color: white;
+        }
+        .btn-success:hover { background: #047857; }
+        .actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            padding-top: 20px;
+            border-top: 1px solid #333;
+        }
+        .done-message {
+            text-align: center;
+            padding: 60px;
+            color: #4ade80;
+            font-size: 1.3em;
+        }
+        .hint {
+            text-align: center;
+            color: #666;
+            font-size: 0.85em;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>NN Character Labeler</h1>
+            <div class="stats">
+                <span id="progress">Loading...</span>
+            </div>
+        </div>
+
+        <div id="labeling-ui">
+            <div class="main-display">
+                <img id="char-image" class="char-image" src="" alt="Character">
+                <div id="filename" class="filename"></div>
+                <div id="prediction" class="prediction" style="display: none;">
+                    Model prediction: <span class="char" id="pred-char"></span>
+                    <span id="confidence" class="confidence"></span>
+                </div>
+            </div>
+
+            <div class="controls">
+                <input
+                    type="text"
+                    id="label-input"
+                    maxlength="1"
+                    placeholder="?"
+                    autofocus
+                />
+                <button class="btn-primary" onclick="submitLabel()">Label</button>
+                <button class="btn-secondary" onclick="acceptPrediction()">Accept Prediction</button>
+            </div>
+            <div class="hint">Type a character and press Enter, or click Accept to use model prediction</div>
+
+            <div class="actions">
+                <button class="btn-success" onclick="trainModel()">Train Model</button>
+                <button class="btn-secondary" onclick="exportLabels()">Export</button>
+            </div>
+        </div>
+
+        <div id="done-ui" class="done-message" style="display: none;">
+            All images labeled!
+        </div>
+    </div>
+
+    <script>
+        let currentFilename = null;
+        let currentPrediction = null;
+
+        function loadNext() {
+            fetch('/api/next')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.done) {
+                        document.getElementById('labeling-ui').style.display = 'none';
+                        document.getElementById('done-ui').style.display = 'block';
+                        return;
+                    }
+
+                    currentFilename = data.filename;
+                    currentPrediction = data.prediction;
+
+                    document.getElementById('char-image').src = data.image_url;
+                    document.getElementById('filename').textContent = data.filename;
+
+                    // Update progress
+                    const pct = ((data.labeled_count / data.total_count) * 100).toFixed(1);
+                    let progressText = `${data.labeled_count} / ${data.total_count} (${pct}%)`;
+                    if (data.model_trained) {
+                        progressText += ' [model trained]';
+                    }
+                    document.getElementById('progress').textContent = progressText;
+
+                    // Show prediction if available
+                    const predDiv = document.getElementById('prediction');
+                    if (data.prediction) {
+                        document.getElementById('pred-char').textContent = data.prediction;
+                        const confPct = (data.confidence * 100).toFixed(1);
+                        const confEl = document.getElementById('confidence');
+                        confEl.textContent = `(${confPct}% confident)`;
+                        confEl.className = 'confidence ' +
+                            (data.confidence > 0.9 ? 'high' :
+                             data.confidence > 0.7 ? 'medium' : 'low');
+                        predDiv.style.display = 'block';
+                    } else {
+                        predDiv.style.display = 'none';
+                    }
+
+                    // Focus input and pre-fill with prediction
+                    const input = document.getElementById('label-input');
+                    input.value = data.prediction || '';
+                    input.focus();
+                    input.select();
+                });
+        }
+
+        function submitLabel() {
+            const char = document.getElementById('label-input').value;
+            if (!char || !currentFilename) return;
+
+            fetch('/api/label', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({filename: currentFilename, char: char})
+            })
+            .then(r => r.json())
+            .then(() => {
+                document.getElementById('label-input').value = '';
+                loadNext();
+            });
+        }
+
+        function acceptPrediction() {
+            if (currentPrediction) {
+                document.getElementById('label-input').value = currentPrediction;
+                submitLabel();
+            }
+        }
+
+        function trainModel() {
+            const btn = event.target;
+            btn.textContent = 'Training...';
+            btn.disabled = true;
+
+            fetch('/api/train', {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    btn.textContent = 'Train Model';
+                    btn.disabled = false;
+                    alert(`Trained on ${data.num_classes} character classes.\n${data.predictions_count} predictions generated.`);
+                    loadNext();
+                });
+        }
+
+        function exportLabels() {
+            fetch('/api/export')
+                .then(r => r.json())
+                .then(data => {
+                    alert(`Exported to ${data.file}\n\nHuman labels: ${data.human_labels}\nModel predictions (>95%): ${data.model_predictions}\nTotal: ${data.total}`);
+                });
+        }
+
+        // Enter to submit
+        document.getElementById('label-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') submitLabel();
+        });
+
+        // Load first image
+        loadNext();
+    </script>
+</body>
+</html>
