@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Character Cluster Labeler</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #eee;
+        }
+        .progress {
+            font-size: 14px;
+            color: #666;
+        }
+        .examples {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            margin: 30px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .example {
+            text-align: center;
+            padding: 10px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .example img {
+            image-rendering: pixelated;
+            width: 100%;
+            height: auto;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 30px;
+        }
+        input[type="text"] {
+            flex: 0 0 100px;
+            padding: 12px;
+            font-size: 24px;
+            text-align: center;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #218838;
+        }
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        .info {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .jump-to {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+        .jump-to input {
+            width: 80px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Character Cluster Labeler</h1>
+            <div class="progress">
+                <div id="progress-text">Loading...</div>
+            </div>
+        </div>
+
+        <div class="info">
+            <strong>Cluster <span id="cluster-id">-</span></strong> 
+            (<span id="cluster-count">0</span> characters)
+            <div style="margin-top: 10px; font-size: 14px; color: #666;">
+                Type the character these images represent, then press Enter or click Label
+            </div>
+        </div>
+
+        <div class="examples" id="examples">
+            <!-- Examples will be loaded here -->
+        </div>
+
+        <div class="controls">
+            <input
+                type="text"
+                id="label-input"
+                maxlength="1"
+                placeholder="?"
+                autofocus
+            />
+            <button class="btn-primary" onclick="labelCluster()">Label & Next</button>
+            <button class="btn-secondary" onclick="skipCluster()">Skip</button>
+            <button class="btn-danger" onclick="splitCluster()">Split (bad cluster)</button>
+            <button class="btn-success" onclick="saveLabels()">Save Progress</button>
+        </div>
+
+        <div class="jump-to">
+            <span>Jump to cluster:</span>
+            <input type="number" id="goto-input" min="0" placeholder="0" />
+            <button class="btn-secondary" onclick="gotoCluster()">Go</button>
+        </div>
+    </div>
+
+    <script>
+        function loadClusterInfo() {
+            fetch('/api/cluster_info')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('cluster-id').textContent = data.cluster_id;
+                    document.getElementById('cluster-count').textContent = data.count;
+                    document.getElementById('progress-text').textContent = 
+                        `Labeled: ${data.labeled_count} / ${data.total_clusters}`;
+                    
+                    // Display examples
+                    const examplesDiv = document.getElementById('examples');
+                    examplesDiv.innerHTML = '';
+                    
+                    data.examples.forEach((imgData, i) => {
+                        const div = document.createElement('div');
+                        div.className = 'example';
+                        div.innerHTML = `<img src="${imgData}" alt="Example ${i}">`;
+                        examplesDiv.appendChild(div);
+                    });
+
+                    // Set current label if exists
+                    document.getElementById('label-input').value = data.current_label || '';
+                    document.getElementById('label-input').focus();
+                });
+        }
+
+        function labelCluster() {
+            const label = document.getElementById('label-input').value;
+            if (!label) {
+                alert('Please enter a label');
+                return;
+            }
+
+            fetch('/api/label_cluster', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({label: label})
+            })
+            .then(r => r.json())
+            .then(() => {
+                document.getElementById('label-input').value = '';
+                loadClusterInfo();
+            });
+        }
+
+        function skipCluster() {
+            fetch('/api/skip_cluster', {method: 'POST'})
+                .then(r => r.json())
+                .then(() => loadClusterInfo());
+        }
+
+        function gotoCluster() {
+            const clusterId = parseInt(document.getElementById('goto-input').value);
+            fetch('/api/goto_cluster', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cluster_id: clusterId})
+            })
+            .then(r => r.json())
+            .then(() => loadClusterInfo());
+        }
+
+        function splitCluster() {
+            const n = prompt('Split into how many sub-clusters?', '2');
+            if (!n) return;
+
+            fetch('/api/split_cluster', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({n_splits: parseInt(n)})
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`Split into clusters: ${data.new_cluster_ids.join(', ')}`);
+                    loadClusterInfo();
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            });
+        }
+
+        function saveLabels() {
+            fetch('/api/save_labels', {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    alert(`Saved to ${data.file}`);
+                });
+        }
+
+        // Enter key to submit
+        document.getElementById('label-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                labelCluster();
+            }
+        });
+
+        // Load initial data
+        loadClusterInfo();
+    </script>
+</body>
+</html>

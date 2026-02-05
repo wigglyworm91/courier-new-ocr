@@ -1,0 +1,7 @@
+width 24.40
+height 46.85
+xoffset 16 + 7(width) = 186.8
+yoffset 22 + 2x = 115.7
+
+76 characters per line
+64 lines per page
