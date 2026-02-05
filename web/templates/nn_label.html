@@ -168,6 +168,7 @@
                 />
                 <button class="btn-primary" onclick="submitLabel()">Label</button>
                 <button class="btn-secondary" onclick="acceptPrediction()">Accept Prediction</button>
+                <button class="btn-secondary" onclick="undo()">Undo</button>
             </div>
             <div class="hint">Type a character and press Enter, or click Accept to use model prediction</div>
 
@@ -258,6 +259,16 @@
                 document.getElementById('label-input').value = currentPrediction;
                 submitLabel();
             }
+        }
+
+        function undo() {
+            fetch('/api/undo', {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        console.log(`Undid: ${data.undone} was "${data.char}"`);
+                    }
+                });
         }
 
         function trainModel() {

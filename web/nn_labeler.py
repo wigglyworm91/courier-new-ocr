@@ -226,6 +226,15 @@ def api_label():
     return jsonify({"success": True, "labeled_count": len(g_labels)})
 
 
+@app.route("/api/undo", methods=["POST"])
+def api_undo():
+    if not g_labels:
+        return jsonify({"success": False, "error": "Nothing to undo"})
+    rp, char = g_labels.popitem()
+    save_labels(g_labels)
+    return jsonify({"success": True, "undone": rp, "char": char, "labeled_count": len(g_labels)})
+
+
 @app.route("/api/train", methods=["POST"])
 def api_train():
     if g_training:
