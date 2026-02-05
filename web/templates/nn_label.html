@@ -152,6 +152,7 @@
             <div class="main-display">
                 <img id="char-image" class="char-image" src="" alt="Character">
                 <div id="filename" class="filename"></div>
+                <a id="context-link" href="#" target="_blank" style="font-size: 0.8em; color: #6366f1;">view context</a>
                 <div id="prediction" class="prediction" style="display: none;">
                     Model prediction: <span class="char" id="pred-char"></span>
                     <span id="confidence" class="confidence"></span>
@@ -206,6 +207,7 @@
 
                     document.getElementById('char-image').src = data.image_url;
                     document.getElementById('filename').textContent = data.filename;
+                    document.getElementById('context-link').href = `/context?centre=${encodeURIComponent(data.filename)}`;
 
                     // Update progress
                     const pct = ((data.labeled_count / data.total_count) * 100).toFixed(1);

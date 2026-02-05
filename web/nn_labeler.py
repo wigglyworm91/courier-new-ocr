@@ -218,6 +218,58 @@ def serve_image(rp: str):
     return send_file(CHAR_DIR / rp, mimetype="image/png")
 
 
+@app.route("/context")
+def context():
+    """Show 3x3 grid of characters around the given character."""
+    import re
+    centre = request.args.get("centre", "")
+
+    # Parse: EFTA00400459-57/char_004720_r62_c008.png
+    match = re.match(r"(.+)/char_(\d+)_r(\d+)_c(\d+)\.png", centre)
+    if not match:
+        return f"Invalid filename format: {centre}", 400
+
+    directory, char_idx, row, col = match.groups()
+    char_idx, row, col = int(char_idx), int(row), int(col)
+
+    # Generate 3x3 grid of filenames
+    # 76 chars per row, so moving up/down changes char_idx by 76
+    grid = []
+    for dr in [-1, 0, 1]:
+        row_imgs = []
+        for dc in [-1, 0, 1]:
+            new_row = row + dr
+            new_col = col + dc
+            new_idx = char_idx + (dr * 76) + dc
+            filename = f"{directory}/char_{new_idx:06d}_r{new_row:02d}_c{new_col:03d}.png"
+            row_imgs.append(filename)
+        grid.append(row_imgs)
+
+    # Simple HTML page with grid
+    html = f"""<!DOCTYPE html>
+<html>
+<head><title>Context: {centre}</title>
+<style>
+body {{ background: #1a1a2e; color: #eee; font-family: sans-serif; padding: 20px; }}
+.grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; max-width: 600px; }}
+.grid img {{ width: 100%; image-rendering: pixelated; background: #fff; }}
+.centre {{ outline: 3px solid #f00; }}
+h3 {{ font-family: monospace; font-size: 0.9em; color: #888; }}
+</style>
+</head>
+<body>
+<h3>{centre}</h3>
+<div class="grid">
+"""
+    for r, row_imgs in enumerate(grid):
+        for c, img in enumerate(row_imgs):
+            cls = ' class="centre"' if r == 1 and c == 1 else ''
+            html += f'<img src="/image/{img}"{cls}>\n'
+
+    html += "</div></body></html>"
+    return html
+
+
 @app.route("/api/label", methods=["POST"])
 def api_label():
     data = request.json
