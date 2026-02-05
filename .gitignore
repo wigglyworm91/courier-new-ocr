@@ -3,3 +3,5 @@ out/
 images.zip
 images/
 .DS_Store
+web/__pycache__/
+cluster_labels.json

@@ -226,13 +226,10 @@
         }
 
         function splitCluster() {
-            const n = prompt('Split into how many sub-clusters?', '2');
-            if (!n) return;
-
             fetch('/api/split_cluster', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({n_splits: parseInt(n)})
+                body: JSON.stringify({n_splits: 2})
             })
             .then(r => r.json())
             .then(data => {

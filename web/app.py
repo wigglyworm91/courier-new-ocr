@@ -5,6 +5,7 @@ Usage: python app.py output_chars/
 Then open http://localhost:5000 in your browser
 """
 
+import sys
 from flask import Flask, render_template, request, jsonify
 import cv2
 import numpy as np
@@ -40,7 +41,9 @@ def load_and_cluster(
         img = cv2.imread(str(f), cv2.IMREAD_GRAYSCALE)
         images.append(img.flatten())
         if len(images) % 1000 == 0:
-            print(f"Loaded {len(images)} / {len(g_char_files)}...")
+            print(f"Loaded {len(images)} / {len(g_char_files)}...\r", end='')
+            sys.stdout.flush()
+    print(f"Loaded {len(images)} character images.")
 
     g_images = images
     X = np.array(images)
@@ -251,7 +254,7 @@ def main():
     print("\nStarting web server...")
     print("Open http://localhost:5000 in your browser to begin labeling")
 
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, use_reloader=False)
 
 
 if __name__ == '__main__':
