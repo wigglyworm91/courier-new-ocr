@@ -29,6 +29,8 @@ cd web; python app.py
 firefox http://localhost:5000
 ```
 
+![website screenshot](./doc/website.png)
+
 Once you've labeled about 200 glyphs, you can run Train Model to get an initial training set.
 You can choose whether you want to do random glyphs (default) or focus specifically on the low-confidence ones.
 
