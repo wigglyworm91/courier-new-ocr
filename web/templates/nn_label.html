@@ -172,6 +172,9 @@
             <div class="hint">Type a character and press Enter, or click Accept to use model prediction</div>
 
             <div class="actions">
+                <label style="display: flex; align-items: center; gap: 8px; color: #888;">
+                    <input type="checkbox" id="uncertain-mode"> Show lowest confidence
+                </label>
                 <button class="btn-success" onclick="trainModel()">Train Model</button>
                 <button class="btn-secondary" onclick="exportLabels()">Export</button>
             </div>
@@ -187,7 +190,8 @@
         let currentPrediction = null;
 
         function loadNext() {
-            fetch('/api/next')
+            const mode = document.getElementById('uncertain-mode').checked ? 'uncertain' : 'random';
+            fetch(`/api/next?mode=${mode}`)
                 .then(r => r.json())
                 .then(data => {
                     if (data.done) {

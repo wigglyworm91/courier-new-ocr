@@ -179,17 +179,13 @@ def train_model() -> None:
     threading.Thread(target=train_model_sync).start()
 
 
-def get_next_to_label() -> str | None:
-    """Get relpath of next image to label, prioritizing low confidence."""
+def get_next_to_label(uncertain: bool = False) -> str | None:
+    """Get relpath of next image to label. If uncertain=True, pick lowest confidence."""
+    if uncertain and g_predictions:
+        unlabeled = [rp for rp in g_predictions if rp not in g_labels]
+        if unlabeled:
+            return min(unlabeled, key=lambda rp: g_predictions[rp][1])
     return relpath(random.choice(g_char_files))
-    unlabeled = [relpath(f) for f in g_char_files if relpath(f) not in g_labels]
-    if not unlabeled:
-        return None
-
-    #if g_predictions:
-    #    return min(unlabeled, key=lambda rp: g_predictions.get(rp, (None, 0.5))[1])
-    #else:
-    return random.choice(unlabeled)
 
 
 @app.route("/")
@@ -199,9 +195,8 @@ def index():
 
 @app.route("/api/next")
 def api_next():
-    print(f'Requesting next image to label...')
-    rp = get_next_to_label()
-    print(f'Next image: {rp}')
+    mode = request.args.get("mode", "random")  # "random" or "uncertain"
+    rp = get_next_to_label(uncertain=(mode == "uncertain"))
     if rp is None:
         return jsonify({"done": True})
 
