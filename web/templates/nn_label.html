@@ -257,17 +257,13 @@
         }
 
         function trainModel() {
-            const btn = event.target;
-            btn.textContent = 'Training...';
-            btn.disabled = true;
-
             fetch('/api/train', {method: 'POST'})
                 .then(r => r.json())
                 .then(data => {
-                    btn.textContent = 'Train Model';
-                    btn.disabled = false;
-                    alert(`Trained on ${data.num_classes} character classes.\n${data.predictions_count} predictions generated.`);
-                    loadNext();
+                    if (!data.success) {
+                        alert(data.error || 'Failed to start training');
+                    }
+                    // Training runs in background, check terminal for progress
                 });
         }
 

@@ -3,13 +3,14 @@
 Neural network based character labeler with active learning.
 Labels characters one at a time, trains a CNN, then prioritizes uncertain predictions.
 
-Usage: python nn_labeler.py ../output_chars/
+Usage: python nn_labeler.py
 Then open http://localhost:5000
 """
 
 import sys
 import json
 import random
+import threading
 from pathlib import Path
 
 import torch
@@ -22,18 +23,17 @@ from flask import Flask, render_template, request, jsonify, send_file
 
 app = Flask(__name__)
 
-# Base64 alphabet for reference
-BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+# Config
+CHAR_DIR = Path("chars")
+LABELS_FILE = Path("nn_labels.json")
 
 # Global state
 g_char_files: list[Path] = []
-g_images: list[np.ndarray] = []  # Raw images (H, W) grayscale
-g_labels: dict[str, str] = {}  # filename -> character label
+g_images: list[np.ndarray] = []
+g_labels: dict[str, str] = {}  # relpath -> char
 g_model: "CharCNN | None" = None
-g_predictions: dict[str, tuple[str, float]] = {}  # filename -> (predicted_char, confidence)
-g_char_to_idx: dict[str, int] = {}
-g_idx_to_char: dict[int, str] = {}
-g_labels_file = Path("nn_labels.json")
+g_predictions: dict[str, tuple[str, float]] = {}  # relpath -> (char, confidence)
+g_training = False
 
 
 class CharCNN(nn.Module):
@@ -47,9 +47,8 @@ class CharCNN(nn.Module):
         self.pool = nn.MaxPool2d(2, 2)
         self.dropout = nn.Dropout(0.25)
 
-        # Calculate flattened size after convolutions
         h, w = input_height, input_width
-        for _ in range(3):  # 3 pooling layers
+        for _ in range(3):
             h, w = h // 2, w // 2
         self.flat_size = 64 * h * w
 
@@ -67,12 +66,13 @@ class CharCNN(nn.Module):
         return x
 
 
-def load_images(char_dir: str) -> None:
-    """Load all character images from directory."""
-    global g_char_files, g_images
+def relpath(f: Path) -> str:
+    return str(f.relative_to(CHAR_DIR))
 
-    char_path = Path(char_dir)
-    g_char_files = sorted(char_path.rglob("*.png"))
+
+def load_images() -> None:
+    global g_char_files, g_images
+    g_char_files = sorted(CHAR_DIR.rglob("*.png"))
 
     print(f"Loading {len(g_char_files)} character images...")
     for i, f in enumerate(g_char_files):
@@ -85,135 +85,111 @@ def load_images(char_dir: str) -> None:
     print(f"Loaded {len(g_images)} images.")
 
 
-def load_existing_labels() -> None:
-    """Load any existing labels from disk."""
-    global g_labels
-    if g_labels_file.exists():
-        with open(g_labels_file) as f:
-            g_labels = json.load(f)
-        print(f"Loaded {len(g_labels)} existing labels.")
+def load_labels() -> dict[str, str]:
+    if LABELS_FILE.exists():
+        with open(LABELS_FILE) as f:
+            return json.load(f)
+    else:
+        raise FileNotFoundError(f"Labels file not found: {LABELS_FILE}")
 
 
-def save_labels() -> None:
-    """Save labels to disk."""
-    with open(g_labels_file, "w") as f:
-        json.dump(g_labels, f, indent=2)
+def save_labels(labels: dict[str, str]) -> None:
+    with open(LABELS_FILE, "w") as f:
+        json.dump(labels, f, indent=2)
 
 
-def build_char_mapping() -> None:
-    """Build character <-> index mapping from current labels."""
-    global g_char_to_idx, g_idx_to_char
-    unique_chars = sorted(set(g_labels.values()))
-    g_char_to_idx = {c: i for i, c in enumerate(unique_chars)}
-    g_idx_to_char = {i: c for c, i in g_char_to_idx.items()}
-
-
-def train_model() -> None:
-    """Train the CNN on current labels."""
-    global g_model, g_predictions
+def train_model_sync() -> None:
+    global g_model, g_predictions, g_training
 
     if len(g_labels) < 10:
         print("Need at least 10 labels to train.")
+        g_training = False
         return
 
-    build_char_mapping()
-    num_classes = len(g_char_to_idx)
+    # Build char <-> idx mapping
+    unique_chars = sorted(set(g_labels.values()))
+    char_to_idx = {c: i for i, c in enumerate(unique_chars)}
+    idx_to_char = {i: c for c, i in char_to_idx.items()}
+    num_classes = len(char_to_idx)
 
     # Build training data
     X, y = [], []
-    filename_to_idx = {f.name: i for i, f in enumerate(g_char_files)}
+    relpath_to_idx = {relpath(f): i for i, f in enumerate(g_char_files)}
 
-    for filename, char in g_labels.items():
-        if filename in filename_to_idx:
-            idx = filename_to_idx[filename]
-            img = g_images[idx]
+    for rp, char in g_labels.items():
+        if rp in relpath_to_idx:
+            img = g_images[relpath_to_idx[rp]]
             X.append(img)
-            y.append(g_char_to_idx[char])
+            y.append(char_to_idx[char])
 
     X = np.array(X, dtype=np.float32) / 255.0
-    X = X.reshape(-1, 1, X.shape[1], X.shape[2])  # Add channel dim
+    X = X.reshape(-1, 1, X.shape[1], X.shape[2])
     y = np.array(y, dtype=np.int64)
 
-    X_tensor = torch.from_numpy(X)
-    y_tensor = torch.from_numpy(y)
-
-    dataset = TensorDataset(X_tensor, y_tensor)
+    dataset = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
     loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
-    # Create model
+    # Create and train model
     h, w = g_images[0].shape
     g_model = CharCNN(num_classes, h, w)
-
     optimizer = torch.optim.Adam(g_model.parameters(), lr=0.001)
     criterion = nn.CrossEntropyLoss()
 
-    # Train
     g_model.train()
-    epochs = 10
-    for epoch in range(epochs):
+    for epoch in range(10):
         total_loss = 0
         for batch_X, batch_y in loader:
             optimizer.zero_grad()
-            outputs = g_model(batch_X)
-            loss = criterion(outputs, batch_y)
+            loss = criterion(g_model(batch_X), batch_y)
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        print(f"  Epoch {epoch + 1}/{epochs}, loss: {total_loss / len(loader):.4f}")
+        print(f"  Epoch {epoch + 1}/10, loss: {total_loss / len(loader):.4f}")
 
+    # Run predictions
     print("Training complete. Running predictions...")
-    predict_all()
-
-
-def predict_all() -> None:
-    """Run predictions on all unlabeled images."""
-    global g_predictions
-
-    if g_model is None:
-        return
-
     g_model.eval()
     g_predictions = {}
 
     with torch.no_grad():
         for i, f in enumerate(g_char_files):
-            if f.name in g_labels:
-                continue  # Skip already labeled
+            rp = relpath(f)
+            if rp in g_labels:
+                continue
 
             img = g_images[i].astype(np.float32) / 255.0
             img_tensor = torch.from_numpy(img).unsqueeze(0).unsqueeze(0)
-
-            outputs = g_model(img_tensor)
-            probs = F.softmax(outputs, dim=1)
+            probs = F.softmax(g_model(img_tensor), dim=1)
             confidence, pred_idx = probs.max(dim=1)
+            g_predictions[rp] = (idx_to_char[int(pred_idx.item())], float(confidence.item()))
 
-            pred_char = g_idx_to_char[pred_idx.item()]
-            g_predictions[f.name] = (pred_char, confidence.item())
-
-            if i % 1000 == 0:
+            if i % 10000 == 0:
                 print(f"  Predicted {i} / {len(g_char_files)}...\r", end="")
                 sys.stdout.flush()
 
     print(f"Predicted {len(g_predictions)} unlabeled images.")
+    g_training = False
 
 
-def get_next_to_label() -> Path | None:
-    """Get the next image to label, prioritizing low confidence predictions."""
-    unlabeled = [f for f in g_char_files if f.name not in g_labels]
+def train_model() -> None:
+    global g_training
+    if g_training:
+        return
+    g_training = True
+    threading.Thread(target=train_model_sync).start()
 
+
+def get_next_to_label() -> str | None:
+    """Get relpath of next image to label, prioritizing low confidence."""
+    return relpath(random.choice(g_char_files))
+    unlabeled = [relpath(f) for f in g_char_files if relpath(f) not in g_labels]
     if not unlabeled:
         return None
 
-    if g_predictions:
-        # Sort by confidence (ascending = least confident first)
-        unlabeled_with_conf = [
-            (f, g_predictions.get(f.name, (None, 0.5))[1]) for f in unlabeled
-        ]
-        unlabeled_with_conf.sort(key=lambda x: x[1])
-        return unlabeled_with_conf[0][0]
-    else:
-        # No predictions yet, return random
-        return random.choice(unlabeled)
+    #if g_predictions:
+    #    return min(unlabeled, key=lambda rp: g_predictions.get(rp, (None, 0.5))[1])
+    #else:
+    return random.choice(unlabeled)
 
 
 @app.route("/")
@@ -223,94 +199,58 @@ def index():
 
 @app.route("/api/next")
 def api_next():
-    """Get next image to label."""
-    next_file = get_next_to_label()
-
-    if next_file is None:
+    print(f'Requesting next image to label...')
+    rp = get_next_to_label()
+    print(f'Next image: {rp}')
+    if rp is None:
         return jsonify({"done": True})
 
-    prediction = g_predictions.get(next_file.name)
-
+    prediction, confidence = g_predictions.get(rp, (None, 0.0))
     return jsonify({
         "done": False,
-        "filename": next_file.name,
-        "image_url": f"/image/{next_file.parent.name}/{next_file.name}",
-        "prediction": prediction[0] if prediction else None,
-        "confidence": prediction[1] if prediction else None,
+        "filename": rp,
+        "image_url": f"/image/{rp}",
+        "prediction": prediction,
+        "confidence": confidence,
         "labeled_count": len(g_labels),
         "total_count": len(g_char_files),
         "model_trained": g_model is not None,
     })
 
 
-@app.route("/image/<path:filename>")
-def serve_image(filename: str):
-    """Serve a character image directly."""
-    return send_file('chars/' + filename, mimetype="image/png")
+@app.route("/image/<path:rp>")
+def serve_image(rp: str):
+    return send_file(CHAR_DIR / rp, mimetype="image/png")
 
 
 @app.route("/api/label", methods=["POST"])
 def api_label():
-    """Label an image."""
     data = request.json
-    filename = data["filename"]
-    char = data["char"]
-
-    g_labels[filename] = char
-    save_labels()
-
+    g_labels[data["filename"]] = data["char"]
+    save_labels(g_labels)
     return jsonify({"success": True, "labeled_count": len(g_labels)})
 
 
 @app.route("/api/train", methods=["POST"])
 def api_train():
-    """Train the model on current labels."""
-    print(f"Training on {len(g_labels)} labels...")
+    if g_training:
+        return jsonify({"success": False, "error": "Already training"})
+    print(f"Starting training on {len(g_labels)} labels...")
     train_model()
-    return jsonify({
-        "success": True,
-        "num_classes": len(g_char_to_idx),
-        "predictions_count": len(g_predictions),
-    })
-
-
-@app.route("/api/stats")
-def api_stats():
-    """Get labeling statistics."""
-    # Count predictions by confidence bucket
-    conf_buckets = {"high": 0, "medium": 0, "low": 0}
-    for _, (_, conf) in g_predictions.items():
-        if conf > 0.9:
-            conf_buckets["high"] += 1
-        elif conf > 0.7:
-            conf_buckets["medium"] += 1
-        else:
-            conf_buckets["low"] += 1
-
-    return jsonify({
-        "labeled_count": len(g_labels),
-        "total_count": len(g_char_files),
-        "model_trained": g_model is not None,
-        "unique_chars": len(g_char_to_idx),
-        "confidence_buckets": conf_buckets,
-    })
+    return jsonify({"success": True})
 
 
 @app.route("/api/export")
 def api_export():
-    """Export all labels (including model predictions above threshold)."""
     threshold = float(request.args.get("threshold", 0.95))
-
     output = {}
 
-    # Add human labels
-    for filename, char in g_labels.items():
-        output[filename] = {"char": char, "source": "human"}
+    for rp, char in g_labels.items():
+        output[rp] = {"char": char, "source": "human"}
 
-    # Add high-confidence predictions
-    for filename, (char, conf) in g_predictions.items():
+    for rp, (char, conf) in g_predictions.items():
         if conf >= threshold:
-            output[filename] = {"char": char, "source": "model", "confidence": conf}
+            output[rp] = {"char": char, "source": "model", "confidence": conf}
 
     export_file = Path("nn_export.json")
     with open(export_file, "w") as f:
@@ -326,17 +266,12 @@ def api_export():
 
 
 def main():
-    char_dir = 'chars/'
-    load_images(char_dir)
-    load_existing_labels()
-
-    #if len(g_labels) >= 10:
-    #    print("Found existing labels, training model...")
-    #    train_model()
+    load_images()
+    global g_labels
+    g_labels = load_labels()
 
     print("\nStarting web server...")
     print("Open http://localhost:5000 in your browser")
-
     app.run(debug=True, port=5000, use_reloader=False)
 
 

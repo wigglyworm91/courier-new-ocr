@@ -6,3 +6,4 @@ images/
 web/__pycache__/
 cluster_labels.json
 web/nn_labels.json
+nn_export.json
