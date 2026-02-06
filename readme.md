@@ -25,7 +25,7 @@ Remove the directories for the first and last page as they have a bunch of extra
 ## Running it
 
 ```bash
-cd web; python app.py
+cd web; python nn_labeler.py
 firefox http://localhost:5000
 ```
 
