@@ -37,4 +37,4 @@ You can choose whether you want to do random glyphs (default) or focus specifica
 Labels are preserved (in `nn_labels.json`) so you can refresh, etc.
 Once you're confident, you can Export Model to get the labels.
 
-mostly vibecoded
+mostly vibecoded, see `transcripts/`
